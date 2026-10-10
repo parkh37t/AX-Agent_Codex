@@ -2,10 +2,11 @@ import { test as base, expect, type Page, type Download } from '@playwright/test
 import { readFile } from 'node:fs/promises';
 import JSZip from 'jszip';
 import type { Artifacts, GenerateRequest, Project } from '../../shared/domain';
+import { workflowProject, workflowResult } from '../fixtures/workflow';
 
 const STORE_KEY = 'ax-agent-studio:projects:v1';
 const ROUTES = ['/', '/sources', '/proposal', '/handoff', '/asis', '/plan', '/trace', '/prototype', '/references', '/advanced', '/settings', '/new'];
-type TestBridge = { requests: GenerateRequest[]; allowGeneration: boolean; holdCompletion: boolean; polls: number; result?: Artifacts };
+type TestBridge = { requests: GenerateRequest[]; allowGeneration: boolean; holdCompletion: boolean; polls: number; result?: Artifacts; failNext?: boolean };
 
 // Every API route is intercepted. The fake completion is an explicit UI fixture,
 // not evidence of a real Codex inference or account connection.
@@ -31,6 +32,7 @@ const test = base.extend<{ bridge: TestBridge; browserErrors: string[] }>({
       if (path === '/api/jobs' && request.method() === 'POST' && state.allowGeneration) {
         const input = request.postDataJSON() as GenerateRequest;
         state.requests.push(input);
+        if (state.failNext) { state.failNext = false; return route.fulfill({ status: 503, json: { error: '명시적 합성 실패: 다시 시도하세요.' } }); }
         const p = input.project;
         state.result = {
           proposal: {
@@ -41,6 +43,7 @@ const test = base.extend<{ bridge: TestBridge; browserErrors: string[] }>({
           analysis: p.analysis, requirements: p.requirements, ia: p.ia, functions: p.functions,
           screens: p.screens, assumptions: ['UI 테스트용 가짜 응답이며 실제 추론 결과가 아닙니다.'],
         };
+        if (input.workflow) state.result = workflowResult(p, input.task);
         return route.fulfill({ status: 202, json: { id: 'explicit-ui-test-job' } });
       }
       if (path === '/api/jobs/explicit-ui-test-job' && state.result) {
@@ -318,7 +321,7 @@ test('fake queued and completed jobs recover after reload and closed results can
   await page.getByRole('button', { name: 'Codex로 제안 설계', exact: true }).click();
   await expect.poll(readBookmark).toEqual({
     id: 'explicit-ui-test-job',
-    context: { projectId: original.id, task: 'proposal', updatedAt: original.updatedAt },
+    context: { projectId: original.id, task: 'proposal', updatedAt: original.updatedAt, instruction: '', workflow: false },
   });
   await expect(page.locator('.job-bar')).toContainText('명시적 UI 테스트 대기');
   const bookmark = await readBookmark();
@@ -353,4 +356,112 @@ test('fake queued and completed jobs recover after reload and closed results can
   await dialog.getByRole('button', { name: '프로젝트에 반영', exact: true }).click();
   await expect(page.getByLabel('결론 제목', { exact: true })).toHaveValue('E2E 가짜 생성 장표');
   await expect.poll(readBookmark).toBeNull();
+});
+
+test('acceptance review persists, exports, invalidates after editing, and imports as history', async ({ page }, testInfo) => {
+  await navigate(page, '/trace');
+  const original = await activeProject(page);
+  const first = original.requirements[0];
+  const panel = page.getByRole('region', { name: '수용 기준 검증 기록' });
+  await panel.getByLabel('검증할 요구사항').selectOption(first.id);
+  await panel.getByLabel('확인자', { exact: true }).fill('합성 E2E 검토자');
+  await panel.getByLabel('검증 방법').selectOption('prototype');
+  await panel.getByLabel('검증 결과').selectOption('pass');
+  await panel.getByLabel('관찰 근거 · 실행 방법과 결과').fill('합성 테스트: 정상·빈값·오류 탭의 표시만 확인. 실제 업무 API 미호출.');
+  await panel.getByRole('button', { name: '검증 기록 추가', exact: true }).click();
+  await expect(panel.locator('.verification-record')).toHaveCount(1);
+  await expect(panel.locator('.verification-record')).toContainText('프로토타입 시뮬레이션');
+  const saved = await activeProject(page);
+  expect(saved.requirements).toEqual(original.requirements);
+  expect(saved.handoff).toEqual(original.handoff);
+  expect(saved.verifications?.[0].invalidated).toBe(false);
+  await page.reload();
+  await expect(panel.locator('.verification-record')).toContainText('합성 E2E 검토자');
+  const csvPromise = page.waitForEvent('download');
+  await panel.getByRole('button', { name: '검증 이력 CSV', exact: true }).click();
+  const csv = (await downloadBytes(await csvPromise)).toString('utf8');
+  expect(csv).toContain(first.acceptance);
+  expect(csv).toContain('프로토타입 시뮬레이션');
+  await navigate(page, '/advanced');
+  const editor = page.locator('.requirement-editor').filter({ has: page.getByText(first.id, { exact: true }) });
+  await editor.getByRole('textbox', { name: '수용 기준', exact: true }).fill(first.acceptance + ' 새 조건을 추가한다.');
+  await expect.poll(async () => (await activeProject(page)).requirements[0].acceptance).toBe(first.acceptance + ' 새 조건을 추가한다.');
+  await expect.poll(async () => (await activeProject(page)).verifications?.[0].invalidated).toBe(true);
+  await navigate(page, '/trace');
+  await expect(panel.locator('.verification-record')).toContainText('재검증 필요');
+  expect((await activeProject(page)).verifications?.[0].acceptance).toBe(first.acceptance);
+  await panel.screenshot({ path: testInfo.outputPath('verification-desktop.png') });
+  const backupDownload = await exportFromMenu(page, '프로젝트 백업 JSON');
+  const backup = await downloadBytes(backupDownload);
+  await page.locator('input[type=file][accept=".json"]').setInputFiles({ name: 'review-backup.json', mimeType: 'application/json', buffer: backup });
+  await expect(page.getByRole('status')).toContainText('백업을 새 프로젝트로 가져왔습니다');
+  const imported = await activeProject(page);
+  expect(imported.id).not.toBe(original.id);
+  expect(imported.verifications).toEqual((JSON.parse(backup.toString('utf8')) as Project).verifications);
+  await navigate(page, '/trace');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.locator('.sidebar').evaluate(el => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await expect(panel.getByRole('button', { name: '검증 기록 추가' })).toBeVisible();
+  await panel.screenshot({ path: testInfo.outputPath('verification-mobile.png') });
+});
+
+test('failed snapshot prevents acceptance review mutation', async ({ page }) => {
+  await navigate(page, '/trace');
+  const before = await activeProject(page);
+  await page.evaluate(() => {
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key.startsWith('ax-agent-studio:history:')) throw new DOMException('quota', 'QuotaExceededError');
+      return set.call(this, key, value);
+    };
+  });
+  const panel = page.getByRole('region', { name: '수용 기준 검증 기록' });
+  await panel.getByLabel('확인자', { exact: true }).fill('합성 검토자');
+  await panel.getByLabel('관찰 근거 · 실행 방법과 결과').fill('미실행 사유를 기록');
+  await panel.getByRole('button', { name: '검증 기록 추가', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('변경을 중단');
+  expect(await activeProject(page)).toEqual(before);
+  await expect(panel.locator('.verification-record')).toHaveCount(0);
+});
+
+test('four explicit workflow jobs require review, preserve failures, and propagate evidence', async ({ page, bridge, browserErrors }, testInfo) => {
+  await page.goto('/');
+  await page.locator('input[type=file][accept=".json"]').setInputFiles({ name: 'synthetic-rfp.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(workflowProject())) });
+  await expect(page.getByRole('status')).toContainText('백업을 새 프로젝트로 가져왔습니다');
+  await navigate(page, '/prototype');
+  bridge.allowGeneration = true;
+  bridge.failNext = true;
+  const before = await activeProject(page);
+  await page.getByRole('button', { name: 'RFP 분석 생성', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('명시적 합성 실패');
+  await expect.poll(() => browserErrors).toEqual(['console: Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
+  browserErrors.splice(0); // This deliberately injected HTTP failure is expected; later errors still fail the fixture.
+  expect(await activeProject(page)).toEqual(before);
+  for (const [index, title] of ['RFP 분석', '근거 기반 전략', 'Wylie 제안서', '연결된 화면설계'].entries()) {
+    const stage = page.getByRole('region', { name: title, exact: true });
+    await stage.getByRole('button', { name: index === 0 ? '이 단계 다시 생성' : `${title} 생성`, exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '생성 결과 검토' });
+    await expect(dialog).toBeVisible();
+    const unchanged = await activeProject(page);
+    expect(Object.keys(unchanged.workflow ?? {})).toHaveLength(index);
+    await dialog.getByRole('button', { name: '프로젝트에 반영', exact: true }).click();
+    await expect(stage).toContainText('검토·반영됨');
+  }
+  expect(bridge.requests.map((r) => r.task)).toEqual(['rfp', 'rfp', 'strategy', 'proposal', 'design']);
+  const p = await activeProject(page);
+  expect(p.rfp?.items[0].sourceId).toBe('SRC-RFP');
+  expect(p.strategies?.[0].requirementIds).toEqual(['internal:REQ-1']);
+  expect(p.proposal.slides[0].strategyIds).toEqual(['internal:STR-1']);
+  expect(p.screens[0].functionIds).toEqual(['internal:FN-1']);
+  expect(p.generationHistory).toHaveLength(4);
+  await page.screenshot({ path: testInfo.outputPath('workflow-local.png'), fullPage: true });
+  // Use the supported whole-project editor to change source text while preserving all existing outputs.
+  await navigate(page, '/advanced');
+  await page.getByRole('button', { name: '전체 JSON', exact: true }).click();
+  const revised = structuredClone(p); revised.sources[0].text += ' 추가 조건';
+  await page.getByLabel('프로젝트 JSON').fill(JSON.stringify(revised));
+  await page.getByRole('button', { name: '검증하고 반영', exact: true }).click();
+  await navigate(page, '/prototype');
+  await expect(page.getByRole('region', { name: '근거 기반 전략', exact: true })).toContainText('입력 변경 · 재검토 필요');
 });

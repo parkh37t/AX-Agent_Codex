@@ -21,6 +21,8 @@ import {
   type GenerateRequest,
 } from "../shared/domain";
 import { buildPrompt } from "./prompt";
+import { loadWylieKnowledge } from "./knowledge";
+import { validateManualResult } from "../shared/generation";
 
 export class BridgeError extends Error {
   constructor(
@@ -34,6 +36,7 @@ export class BridgeError extends Error {
 export type RunResult = {
   result: Artifacts;
   usage?: { inputTokens: number; outputTokens: number };
+  knowledge?: Array<{ path: string; sha256: string }>;
 };
 export type RunOptions = {
   signal: AbortSignal;
@@ -402,6 +405,16 @@ export function validateArtifacts(
       "생성 결과가 산출물 형식과 맞지 않습니다. 내용을 줄이거나 다시 시도하세요.",
       "invalid_output",
     );
+  if (request.workflow) {
+    try { validateManualResult(request.project, parsed.data, request.task); }
+    catch (error) { throw new BridgeError(error instanceof Error ? error.message : "단계 결과가 올바르지 않습니다.", "invalid_workflow_result"); }
+  }
+  if (request.task === "rfp" && (!parsed.data.rfp || !parsed.data.requirements.length))
+    throw new BridgeError("RFP 분석과 요구사항 초안이 비어 있습니다. 다시 생성하세요.", "incomplete_rfp");
+  if (request.workflow && request.task === "proposal" && (!parsed.data.strategies?.length || !parsed.data.proposal.slides.length || parsed.data.proposal.slides.some((s) => !s.strategyIds?.length)))
+    throw new BridgeError("전략과 장표의 근거 연결이 빠졌습니다. 다시 생성하세요.", "incomplete_proposal");
+  if (request.workflow && request.task === "design" && (!parsed.data.ia.length || !parsed.data.functions.length || !parsed.data.screens.length))
+    throw new BridgeError("메뉴·기능·화면 설계가 비어 있습니다. 다시 생성하세요.", "incomplete_design");
   const claimGroups = [
     [parsed.data.requirements, request.project.requirements],
     [parsed.data.analysis, request.project.analysis],
@@ -581,7 +594,10 @@ export function createCodexRunner(
       if (signal.aborted)
         throw new BridgeError("작업이 취소되었습니다.", "cancelled");
       const { help, features } = await readCapabilities();
-      const prompt = buildPrompt(request);
+      let knowledge;
+      try { knowledge = await loadWylieKnowledge(request.task); }
+      catch { throw new BridgeError("Wylie 제작 스킬을 읽지 못했습니다. 프로젝트의 스킬 폴더를 확인하세요.", "knowledge_unavailable"); }
+      const prompt = buildPrompt(request, knowledge.text);
       if (Buffer.byteLength(prompt) > 1_500_000)
         throw new BridgeError(
           "입력 자료가 너무 큽니다. 필요한 원문 범위로 줄여 다시 생성하세요.",
@@ -691,7 +707,7 @@ export function createCodexRunner(
             "invalid_output",
           );
         }
-        return { result: validateArtifacts(value, request), usage };
+        return { result: validateArtifacts(value, request), usage, knowledge: knowledge.references };
       } finally {
         await rm(workdir, { recursive: true, force: true });
       }

@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { generateRequestSchema, type Job } from "../shared/domain";
+import { generateRequestSchema, workflowBlocker, type Job } from "../shared/domain";
 import {
   BridgeError,
   createCodexRunner,
@@ -151,6 +151,9 @@ export function createBridge(options: BridgeOptions = {}) {
         });
       return;
     }
+    const blocker = parsed.data.workflow || parsed.data.task === "rfp"
+      ? workflowBlocker(parsed.data.project, parsed.data.task) : undefined;
+    if (blocker) { res.status(400).json({ error: blocker }); return; }
     while (jobs.size >= 12) {
       const oldest = jobs.keys().next().value;
       if (!oldest) break;
@@ -195,6 +198,7 @@ export function createBridge(options: BridgeOptions = {}) {
         if (controller.signal.aborted) return;
         job.result = validateArtifacts(result.result, parsed.data);
         job.usage = result.usage;
+        job.knowledge = result.knowledge;
         job.status = "completed";
         job.stage = "생성 및 연결 검수 완료";
       } catch (error) {

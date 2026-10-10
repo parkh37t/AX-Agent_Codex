@@ -42,6 +42,14 @@ import {
   createProject,
   inspectProject,
   preserveScopeDecisions,
+  invalidateVerifications,
+  invalidateWorkflow,
+  workflowBlocker,
+  invalidateImportedVerifications,
+  recordVerification,
+  verificationResultLabels,
+  verificationMethodLabels,
+  type Verification,
   mergeArtifacts,
   projectSchema,
   traceRows,
@@ -53,7 +61,12 @@ import {
   type Screen,
   type Task,
 } from "../shared/domain";
-import { api } from "./lib/api";
+import { api, STATIC_HOST } from "./lib/api";
+import { validateManualResult } from "../shared/generation";
+import { wylieGuide } from "../shared/wylie-guide";
+import { buildPrompt } from "../server/prompt";
+import { artifactSchema } from "../shared/domain";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { makeDemoProject } from "./lib/demo";
 import { applyHandoff, planFromMenu } from "./lib/planning";
 import {
@@ -63,6 +76,7 @@ import {
   projectMarkdown,
   prototypeHtml,
   traceCsv,
+  verificationCsv,
 } from "./lib/exports";
 import {
   getSnapshots,
@@ -92,7 +106,7 @@ const navGroups = [
   {
     title: "TOOLS",
     items: [
-      ["/prototype", "전체 설계 실행", Zap],
+      ["/prototype", "RFP → 제안 → 화면설계", Zap],
       ["/references", "레퍼런스", BookOpen],
       ["/advanced", "작업대", Code2],
     ],
@@ -113,6 +127,8 @@ const routeNames: Record<string, string> = {
   "/new": "새 프로젝트",
 };
 const stageLabels: Record<Task, string> = {
+  rfp: "RFP 분석",
+  strategy: "제안 전략",
   proposal: "제안 설계",
   analysis: "현황 분석",
   design: "화면 설계",
@@ -303,11 +319,11 @@ export default function App() {
         typeof raw?.id === "string" &&
         typeof raw.context?.projectId === "string" &&
         typeof raw.context.updatedAt === "string" &&
-        ["proposal", "analysis", "design", "all"].includes(raw.context.task)
+        ["rfp", "strategy", "proposal", "analysis", "design", "all"].includes(raw.context.task)
       )
         return raw as {
           id: string;
-          context: { projectId: string; task: Task; updatedAt: string };
+          context: { projectId: string; task: Task; updatedAt: string; instruction?: string; workflow?: boolean };
         };
     } catch {
       /* A malformed task bookmark does not affect project data. */
@@ -328,6 +344,9 @@ export default function App() {
     projectId: string;
     task: Task;
     updatedAt: string;
+    instruction?: string;
+    workflow?: boolean;
+    manual?: boolean;
   } | null>(savedJob?.context ?? null);
   const [pending, setPending] = useState<{
     result: Artifacts;
@@ -365,9 +384,10 @@ export default function App() {
           );
           return p;
         }
-        return JSON.stringify(parsed.data.handoff) === JSON.stringify(p.handoff)
+        const scoped = JSON.stringify(parsed.data.handoff) === JSON.stringify(p.handoff)
           ? { ...parsed.data, handoff: preserveScopeDecisions(p, parsed.data) }
           : parsed.data;
+        return { ...scoped, workflow: invalidateWorkflow(p, scoped), verifications: invalidateVerifications(p, scoped) };
       }),
     );
   }
@@ -425,7 +445,7 @@ export default function App() {
   useEffect(() => {
     try {
       if (
-        job &&
+        job && !jobContext?.manual &&
         jobContext &&
         ["queued", "running", "completed"].includes(job.status)
       )
@@ -480,8 +500,12 @@ export default function App() {
     };
   }, [job?.id, job?.status, jobContext]);
 
-  async function generate(task: Task, instruction = "") {
+  async function generate(task: Task, instruction = "", workflow = false) {
     if (busy) return;
+    if (workflow) {
+      const blocker = workflowBlocker(project, task);
+      if (blocker) { notify(blocker); return; }
+    }
     if (
       !status?.authenticated ||
       status.authMode !== "chatgpt" ||
@@ -505,9 +529,11 @@ export default function App() {
       projectId: project.id,
       task,
       updatedAt: project.updatedAt,
+      instruction,
+      workflow,
     };
     try {
-      const { id } = await api.generate({ project, task, instruction });
+      const { id } = await api.generate({ project, task, instruction, workflow });
       setJobContext(context);
       setJob({
         id,
@@ -517,6 +543,8 @@ export default function App() {
       });
     } catch (e) {
       notify((e as Error).message);
+      setJobContext(context);
+      setJob({ id: "", status: "failed", stage: "생성 요청 실패", startedAt: new Date().toISOString(), error: (e as Error).message });
     } finally {
       setGenerating(false);
     }
@@ -529,8 +557,17 @@ export default function App() {
       return;
     }
     let next: Project;
+    if (pending.context.workflow && target.updatedAt !== pending.context.updatedAt) {
+      notify("생성 중 입력이 변경됐습니다. 최신 자료로 이 단계를 다시 생성하세요.");
+      return;
+    }
     try {
       next = mergeArtifacts(target, pending.result, pending.context.task);
+      next.generationHistory = [...(target.generationHistory ?? []).slice(-49), {
+        task: pending.context.task, method: pending.context.manual ? "manual_chatgpt" : "codex_cli",
+        appliedAt: new Date().toISOString(), sources: target.sources.map(({ id, name, readScope }) => ({ id, name, readScope })),
+        knowledge: job?.knowledge ?? [],
+      }];
     } catch {
       notify(
         "현재 프로젝트에 반영할 수 없는 결과입니다. 결과 JSON을 보관해 주세요.",
@@ -554,13 +591,29 @@ export default function App() {
     setJob(null);
     setJobContext(null);
     navigate(
-      pending.context.task === "proposal"
+      pending.context.workflow || pending.context.task === "rfp"
+        ? "/prototype"
+        : pending.context.task === "proposal"
         ? "/proposal"
         : pending.context.task === "analysis"
           ? "/asis"
           : "/plan",
     );
     notify("생성 결과를 반영했습니다. 근거와 연결 검수를 확인해 주세요.");
+  }
+  async function importManualResult(file: File, task: Task) {
+    try {
+      if (file.size > 15 * 1024 * 1024) throw new Error("15MB 이하 JSON을 선택하세요.");
+      const ticket = JSON.parse(sessionStorage.getItem(`ax:manual:${project.id}:${task}`) || "null");
+      const envelope = JSON.parse(await file.text());
+      if (!ticket || ticket.id !== envelope.requestId || envelope.task !== task || ticket.updatedAt !== project.updatedAt)
+        throw new Error("입력 묶음과 결과가 일치하지 않거나 자료가 변경됐습니다. 현재 단계의 입력 묶음을 다시 내보내세요.");
+      const result = validateManualResult(project, envelope.artifacts, task);
+      const context = { projectId: project.id, task, updatedAt: project.updatedAt, workflow: true, manual: true };
+      setJobContext(context);
+      setJob({ id: ticket.id, status: "completed", stage: "수동 ChatGPT 결과 가져오기 · 실제 호출은 앱에서 확인하지 않음", result, knowledge: ticket.knowledge ?? [], startedAt: new Date().toISOString() });
+      setPending({ result, context });
+    } catch (e) { notify((e as Error).message); }
   }
   function newProject(p: Project) {
     setProjects((ps) => [p, ...ps]);
@@ -606,7 +659,7 @@ export default function App() {
     try {
       if (file.size > 15 * 1024 * 1024)
         throw new Error("15MB 이하 JSON을 선택해 주세요.");
-      const p = projectSchema.parse(JSON.parse(await file.text()));
+      const p = invalidateImportedVerifications(projectSchema.parse(JSON.parse(await file.text())));
       p.id = crypto.randomUUID();
       p.updatedAt = new Date().toISOString();
       setProjects((ps) => [p, ...ps]);
@@ -641,7 +694,7 @@ export default function App() {
           </div>
         </a>
         <div className="workspace-label">
-          나의 작업 공간 <span className="tiny-badge">LOCAL</span>
+          나의 작업 공간 <span className="tiny-badge">{STATIC_HOST ? "BROWSER" : "LOCAL"}</span>
         </div>
         <label className="project-switch">
           <Layers3 size={17} />
@@ -766,6 +819,7 @@ export default function App() {
         </header>
         <input
           ref={importRef}
+          aria-label="프로젝트 백업 파일"
           type="file"
           accept=".json"
           hidden
@@ -801,6 +855,7 @@ export default function App() {
           </div>
         )}
         <main className="content" key={project.id}>
+          {STATIC_HOST && <div className="callout static-notice"><ShieldCheck size={18} /><span>공개 웹 · 자료는 이 브라우저에만 저장합니다. AI 자동 실행·사용자별 ChatGPT 로그인은 미연결입니다. 입력 묶음 내보내기와 결과 가져오기는 수동 흐름입니다.</span></div>}
           {route !== "/new" && route !== "/settings" && project.isDemo && (
             <div className="demo-notice">
               <span className="demo-dot" />
@@ -870,6 +925,8 @@ export default function App() {
           {route === "/trace" && (
             <Trace
               {...common}
+              key={project.id}
+              beforeChange={() => snapshot(project, "검증 기록 전")}
               issues={issues}
               rows={trace}
               onScreen={(id) => {
@@ -883,9 +940,16 @@ export default function App() {
           {route === "/prototype" && (
             <Pipeline
               {...common}
+              key={project.id}
               busy={!!busy}
-              job={job}
-              generate={() => generate("all")}
+              job={jobContext?.projectId === project.id ? job : null}
+              currentTask={jobContext?.projectId === project.id ? jobContext.task : undefined}
+              generate={(task, instruction) => generate(task, instruction, true)}
+              beforeChange={() => snapshot(project, "기획 단계 수동 반영 전")}
+              onSources={() => navigate("/sources")}
+              onProposal={() => navigate("/proposal")}
+              onDesign={() => navigate("/plan")}
+              onImport={importManualResult}
               onPreview={() => exportAs("html")}
             />
           )}
@@ -1024,10 +1088,17 @@ export default function App() {
               </span>
             </div>
             <div className="result-summary">
-              {pending.result.proposal.summary ||
+              {(pending.context.task === "rfp" ? pending.result.rfp?.summary : pending.result.proposal.summary) ||
                 pending.result.analysis[0]?.recommendation ||
                 "산출물의 근거와 연결을 확인해 주세요."}
             </div>
+            {pending.context.workflow && <details open className="workflow-result"><summary>단계별 근거와 생성 내용</summary>
+              {pending.context.task === "rfp" && pending.result.rfp?.items.map((item) => <article key={item.id}><strong>{item.kind} · {item.text}</strong><blockquote>{item.quote}</blockquote><small>{item.sourceId} → {item.requirementIds.join(", ")}</small></article>)}
+              {pending.context.task === "strategy" && pending.result.strategies?.map((s) => <article key={s.id}><strong>{s.title}</strong><p>{s.rationale}</p><small>{s.evidenceIds.join(", ")} → {s.requirementIds.join(", ")}</small></article>)}
+              {pending.context.task === "proposal" && pending.result.proposal.slides.map((s) => <article key={s.id}><strong>{s.title}</strong><p>{s.message}</p><small>전략 {(s.strategyIds ?? []).join(", ")}</small></article>)}
+              {pending.context.task === "design" && pending.result.screens.map((s) => <article key={s.id}><strong>{s.title} · {s.route}</strong><p>{s.sections.join(" · ")}</p><small>{s.functionIds.join(", ")} · {s.states.join(", ")}</small></article>)}
+              {!!job?.knowledge?.length && <p>이번 생성 입력에 포함한 Wylie 참조 {job.knowledge.length}개 · JSON 작업 응답에 경로와 해시 기록</p>}
+            </details>}
             {projects.find((p) => p.id === pending.context.projectId)
               ?.updatedAt !== pending.context.updatedAt && (
               <div className="callout amber">
@@ -1533,7 +1604,7 @@ function Sources({ project, update, notify }: Common) {
           name: result.name,
           kind,
           text: result.text,
-          readScope: `${result.pageCount === null ? "문단·표 텍스트" : `${result.pageCount}페이지 텍스트`}${result.warnings.length ? " · " + result.warnings.join(" / ") : " · 이미지와 도형의 시각 판독은 미실행"}`,
+          readScope: `${result.pageCount === null ? "텍스트 추출" : `${result.pageCount}페이지 텍스트`}${result.warnings.length ? " · " + result.warnings.join(" / ") : " · 이미지와 도형의 시각 판독은 미실행"}`,
         });
       } catch (e) {
         notify((e as Error).message);
@@ -1578,7 +1649,7 @@ function Sources({ project, update, notify }: Common) {
                 ? "자료를 읽고 있습니다"
                 : "프로젝트 자료를 여기에 놓으세요"}
             </h3>
-            <p>PDF · DOCX · PPTX · TXT · MD · CSV · JSON · 파일당 15MB</p>
+            <p>{STATIC_HOST ? "PDF · TXT · MD · CSV · JSON" : "PDF · DOCX · PPTX · TXT · MD · CSV · JSON"} · 파일당 15MB</p>
             <Button
               variant="secondary"
               disabled={uploading}
@@ -1587,7 +1658,7 @@ function Sources({ project, update, notify }: Common) {
               파일 선택
             </Button>
             <small>
-              로컬 연결에서 텍스트를 추출합니다. 스캔 이미지 OCR은 지원하지
+              {STATIC_HOST ? "이 브라우저에서 텍스트를 추출합니다." : "로컬 연결에서 텍스트를 추출합니다."} 스캔 이미지 OCR은 지원하지
               않습니다.
             </small>
             <input
@@ -1595,7 +1666,7 @@ function Sources({ project, update, notify }: Common) {
               type="file"
               multiple
               hidden
-              accept=".pdf,.docx,.pptx,.txt,.md,.csv,.json"
+              accept={STATIC_HOST ? ".pdf,.txt,.md,.csv,.json" : ".pdf,.docx,.pptx,.txt,.md,.csv,.json"}
               onChange={(e) => upload(e.target.files)}
             />
           </div>
@@ -2752,6 +2823,61 @@ function Design({
   );
 }
 
+function VerificationPanel({ project, update, notify, beforeChange }: Common & { beforeChange: () => boolean }) {
+  const [requirementId, setRequirementId] = useState(project.requirements[0]?.id ?? "");
+  const [result, setResult] = useState<Verification["result"]>("not_run");
+  const [method, setMethod] = useState<Verification["method"]>("document_review");
+  const [evidence, setEvidence] = useState("");
+  const [reviewer, setReviewer] = useState("");
+  const [error, setError] = useState("");
+  const requirement = project.requirements.find((r) => r.id === requirementId);
+  const records = project.verifications ?? [];
+  return <section className="panel verification-panel" aria-label="수용 기준 검증 기록">
+    <div className="panel-heading"><h3>수용 기준 검증 기록</h3>
+      <Button variant="secondary" onClick={() => downloadFile(`${project.title}-verification.csv`, "\uFEFF" + verificationCsv(project), "text/csv;charset=utf-8")}>검증 이력 CSV</Button>
+    </div>
+    <p className="muted">사람이 확인한 방법과 결과를 기록합니다. 구조 연결·AI 생성·계약 승인을 대신하지 않습니다. 요구·근거·연결 설계가 바뀌면 이전 기록은 재검증이 필요합니다.</p>
+    <form onSubmit={(event) => {
+      event.preventDefault();
+      try {
+        const next = recordVerification(project, { requirementId, result, method, evidence, reviewer });
+        if (!beforeChange()) return;
+        update(next);
+        setEvidence(""); setError("");
+        notify("검증 기록을 추가했습니다. 기존 근거 상태와 범위 결정은 유지합니다.");
+      } catch {
+        setError("수용 기준·확인자·관찰 근거를 작성하세요. 검증 이력은 최대 500개입니다.");
+      }
+    }}>
+      <div className="form-grid">
+        <Field label="검증할 요구사항"><select value={requirementId} onChange={(e) => setRequirementId(e.target.value)}>
+          <option value="">요구사항 선택</option>
+          {project.requirements.map((r) => <option key={r.id} value={r.id}>{r.id} · {r.text}</option>)}
+        </select></Field>
+        <Field label="확인자"><input required maxLength={200} value={reviewer} onChange={(e) => setReviewer(e.target.value)} placeholder="기록을 남기는 사람" /></Field>
+        <Field label="검증 방법"><select value={method} onChange={(e) => setMethod(e.target.value as Verification["method"])}>
+          {Object.entries(verificationMethodLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+        </select></Field>
+        <Field label="검증 결과"><select value={result} onChange={(e) => setResult(e.target.value as Verification["result"])}>
+          {Object.entries(verificationResultLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+        </select></Field>
+      </div>
+      <p><strong>현재 수용 기준: </strong>{requirement?.acceptance || "작업대에서 수용 기준을 먼저 작성하세요."}</p>
+      <Field label="관찰 근거 · 실행 방법과 결과"><textarea required maxLength={4000} rows={3} value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="확인한 대상·절차·관찰 결과 또는 미실행/오류 사유. 비밀번호·토큰은 입력하지 마세요." /></Field>
+      {error && <p role="alert" className="error-text">{error}</p>}
+      <Button disabled={!requirement?.acceptance.trim() || records.length >= 500} type="submit">검증 기록 추가</Button>
+    </form>
+    <div className="verification-history">
+      {!records.length && <p className="muted">아직 기록이 없습니다. 실서비스 동작을 검증했다고 간주하지 않습니다.</p>}
+      {[...records].reverse().map((r) => <article className="verification-record" key={r.id}>
+        <strong>{r.requirementId} · {verificationResultLabels[r.result]} · {verificationMethodLabels[r.method]}</strong>
+        <p>{r.invalidated || !project.requirements.some((req) => req.id === r.requirementId) ? "재검증 필요" : "현재 명세에 대한 기록"} · {r.reviewer} · {formatDate(r.recordedAt)}</p>
+        <p>기록 당시 수용 기준: {r.acceptance}</p><p className="verification-evidence">{r.evidence}</p>
+      </article>)}
+    </div>
+  </section>;
+}
+
 function Trace({
   project,
   update,
@@ -2761,7 +2887,9 @@ function Trace({
   onScreen,
   onEdit,
   onExport,
+  beforeChange,
 }: Common & {
+  beforeChange: () => boolean;
   issues: ReturnType<typeof inspectProject>;
   rows: ReturnType<typeof traceRows>;
   onScreen: (id: string) => void;
@@ -2811,7 +2939,7 @@ function Trace({
             보완 항목
           </span>
           <span>
-            <strong>미실행</strong>실서비스 동작 검증
+            <strong>자동 실행 없음</strong>실서비스 동작 검증
           </span>
         </div>
       </div>
@@ -2926,6 +3054,7 @@ function Trace({
           )}
         </div>
       </div>
+      <VerificationPanel project={project} update={update} notify={notify} beforeChange={beforeChange} />
       {selectedFn && (
         <div className="panel trace-edit">
           <h3>{selectedFn.id} 연결 편집</h3>
@@ -3015,117 +3144,78 @@ function Trace({
   );
 }
 
-function Pipeline({
-  project,
-  busy,
-  job,
-  generate,
-  onPreview,
-}: Common & {
-  busy: boolean;
-  job: Job | null;
-  generate: () => void;
-  onPreview: () => void;
+function Pipeline({ project, busy, job, currentTask, generate, onPreview, beforeChange, onSources, onProposal, onDesign, onImport, notify }: Common & {
+  busy: boolean; job: Job | null; currentTask?: Task;
+  generate: (task: Task, instruction: string) => void;
+  onPreview: () => void; beforeChange: () => boolean;
+  onSources: () => void; onProposal: () => void; onDesign: () => void;
+  onImport: (file: File, task: Task) => void;
 }) {
-  const issues = inspectProject(project);
-  return (
-    <>
-      <SectionHead
-        eyebrow="ONE BRIEF. CONNECTED OUTPUTS."
-        title="한 번의 맥락으로, 연결된 전체 설계."
-        description="같은 자료와 ID 체계로 제안·현황 분석·화면 명세를 함께 생성하고 결과를 검토합니다."
-      />
-      <div className="pipeline-hero">
-        <div className="pipeline-icon">
-          <Zap size={30} />
-        </div>
-        <h2>자료의 의도가 화면까지 이어집니다.</h2>
-        <p>
-          현재 프로젝트의 브리프와 자료 {project.sources.length}개를 Codex에
-          전달합니다.
-          <br />
-          생성 결과는 검토 후 반영하며, 기존 버전은 보관합니다.
-        </p>
-        <Button disabled={busy} onClick={generate}>
-          <Sparkles size={17} />
-          {busy ? "설계 진행 중" : "전체 설계 실행"}
-          <ArrowRight size={17} />
-        </Button>
-      </div>
-      <div className="pipeline-steps">
-        {[
-          {
-            n: "01",
-            name: "맥락 준비",
-            desc: "브리프와 제공 자료를 한 작업으로 구성",
-            value: `${project.sources.length}개 자료`,
-            ready: !!(project.brief || project.sources.length),
-            icon: FolderOpen,
-          },
-          {
-            n: "02",
-            name: "제안 · 분석",
-            desc: "메시지와 현행 과제를 근거로 연결",
-            value: `${project.proposal.slides.length}개 장표 · ${project.analysis.length}개 분석`,
-            ready: !!project.proposal.slides.length,
-            icon: FileText,
-          },
-          {
-            n: "03",
-            name: "설계 구체화",
-            desc: "REQ · IA · FN · SCR와 화면 상태 생성",
-            value: `${project.screens.length}개 화면`,
-            ready: !!project.screens.length,
-            icon: Columns3,
-          },
-          {
-            n: "04",
-            name: "연결 검수",
-            desc: "참조 오류와 누락 항목을 별도로 확인",
-            value: `${issues.length}개 보완 항목`,
-            ready: !!project.screens.length && !issues.length,
-            icon: ShieldCheck,
-          },
-        ].map((s) => (
-          <div className="pipeline-step" key={s.n}>
-            <div>
-              <span>{s.n}</span>
-              <s.icon size={22} />
-            </div>
-            <h3>{s.name}</h3>
-            <p>{s.desc}</p>
-            <Tag tone={s.ready ? "green" : "neutral"}>{s.value}</Tag>
+  const [instruction, setInstruction] = useState("");
+  const steps = [
+    { task: "rfp" as const, title: "RFP 분석", detail: "목표·요구·평가·제약을 원문 인용과 연결", count: `${project.rfp?.items.length ?? 0}개 분석 · ${project.requirements.length}개 요구` },
+    { task: "strategy" as const, title: "근거 기반 전략", detail: "검토한 분석에서 전략·REQ·근거를 연결", count: `${project.strategies?.length ?? 0}개 전략` },
+    { task: "proposal" as const, title: "Wylie 제안서", detail: "검토한 전략을 결론·장표·도식으로 구성", count: `${project.proposal.slides.length}개 장표` },
+    { task: "design" as const, title: "연결된 화면설계", detail: "제안의 요구를 IA·기능·화면과 상태로 연결", count: `${project.ia.length}개 메뉴 · ${project.functions.length}개 기능 · ${project.screens.length}개 화면` },
+  ];
+  async function exportInput(task: Task) {
+    try {
+      const blocker = workflowBlocker(project, task);
+      if (blocker) throw new Error(blocker);
+      const id = crypto.randomUUID();
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(wylieGuide))), (b) => b.toString(16).padStart(2, "0")).join("");
+      const ticket = { id, task, updatedAt: project.updatedAt, knowledge: [{ path: "shared/wylie-guide.ts (고객 사례 없는 제작 규칙 요약)", sha256: hash }] };
+      sessionStorage.setItem(`ax:manual:${project.id}:${task}`, JSON.stringify(ticket));
+      const request = { project, task, instruction, workflow: true };
+      const prompt = buildPrompt(request, wylieGuide);
+      const envelopeSchema = { requestId: id, task, artifacts: "아래 OUTPUT_SCHEMA에 맞는 완전한 객체" };
+      downloadFile(`AX-${task}-ChatGPT-input.txt`, [
+        "수동 ChatGPT 작업용 입력입니다. 이 웹 앱은 모델을 호출하지 않았습니다. 자료를 직접 전달하기 전에 공유 범위를 확인하세요.",
+        prompt,
+        "위 지침의 최종 artifacts JSON을 아래 envelope의 artifacts에 넣어 JSON 파일로 반환하세요. requestId와 task는 그대로 유지하세요.",
+        JSON.stringify(envelopeSchema, null, 2),
+        "OUTPUT_SCHEMA (artifacts):", JSON.stringify(zodToJsonSchema(artifactSchema, { target: "jsonSchema7", $refStrategy: "none" }), null, 2),
+      ].join("\n\n"), "text/plain;charset=utf-8");
+      notify("입력 묶음을 저장했습니다. ChatGPT에서 직접 실행한 결과 JSON을 같은 단계로 가져오세요.");
+    } catch (error) { notify((error as Error).message); }
+  }
+  return <>
+    <SectionHead eyebrow="RFP → STRATEGY → PROPOSAL → SCREENS" title="RFP의 의도를 전략과 화면으로 연결합니다." description="각 단계의 근거와 초안을 검토·반영한 뒤 다음 단계로 진행합니다. API 키는 사용하지 않습니다." />
+    <div className="panel workflow-intro">
+      <h2>01 · RFP를 등록하세요</h2>
+      <p>등록된 RFP {project.sources.filter((s) => s.kind === "rfp").length}개. 원문 인용과 요구 ID를 유지하며 분석합니다.</p>
+      <Button onClick={onSources}>RFP 자료 등록 · 확인</Button>
+      <p className="muted">{STATIC_HOST ? "이 공개 웹은 자동 생성 서버가 없습니다. 각 단계의 입력 묶음을 내려받아 본인의 ChatGPT에서 실행하고 결과를 수동으로 가져올 수 있습니다." : "자동 생성은 같은 컴퓨터의 공식 Codex ChatGPT 로그인으로 실행합니다. 결과 검토 전에는 기존 산출물을 변경하지 않습니다."}</p>
+      <Field label="이번 생성의 보완 요청"><textarea maxLength={10000} rows={2} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="제출본/발표본, 중점 전략, 필수 화면 등" /></Field>
+    </div>
+    <div className="workflow-stages">
+      {steps.map((step, i) => {
+        const receipt = project.workflow?.[step.task];
+        const blocker = workflowBlocker(project, step.task);
+        const waiting = currentTask === step.task && job?.status === "completed";
+        const running = currentTask === step.task && busy;
+        const failed = currentTask === step.task && (job?.status === "failed" || job?.status === "cancelled");
+        return <section className="panel workflow-stage" aria-label={step.title} key={step.task}>
+          <span className="eyebrow">0{i + 2}</span><h2>{step.title}</h2><p>{step.detail}</p>
+          <Tag tone={receipt?.stale || failed ? "amber" : receipt ? "green" : "neutral"}>{running ? "진행 중" : waiting ? "결과 검토 대기" : failed ? "실패·중단 · 재시도 가능" : receipt?.stale ? "입력 변경 · 재검토 필요" : receipt ? "검토·반영됨" : "아직 반영하지 않음"}</Tag>
+          <p>{step.count}</p>{blocker && <p className="muted">{blocker}</p>}
+          {failed && <p role="alert">{job?.error || "작업을 중단했습니다. 기존 산출물은 유지됩니다."}</p>}
+          <div className="workflow-actions">
+            {!STATIC_HOST && <Button disabled={busy || !!blocker || waiting} onClick={() => generate(step.task, instruction)}>{failed ? "이 단계 다시 생성" : `${step.title} 생성`}</Button>}
+            <Button variant="secondary" disabled={busy || !!blocker || waiting} onClick={() => exportInput(step.task)}>ChatGPT 입력 묶음</Button>
+            <label className={`btn secondary ${busy || blocker ? "disabled" : ""}`}>수동 결과 JSON 가져오기<input type="file" accept=".json" aria-label={`${step.title} 결과 JSON`} hidden disabled={busy || !!blocker || waiting} onChange={(e) => { const file = e.target.files?.[0]; if (file) onImport(file, step.task); e.target.value = ""; }} /></label>
           </div>
-        ))}
-      </div>
-      {job && (
-        <div className="callout">
-          <LoaderCircle size={18} className={busy ? "spin" : ""} />
-          <span>
-            최근 작업 · {job.stage} · {job.status}
-            {job.error ? ` · ${job.error}` : ""}
-          </span>
-        </div>
-      )}
-      <div className="panel deliver-panel">
-        <div>
-          <h3>설계가 준비됐다면 직접 경험해 보세요.</h3>
-          <p>
-            화면 상태 전환·검색·폼 검증을 가진 오프라인 HTML을 내보냅니다. 실제
-            업무 서버에는 연결되지 않습니다.
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          disabled={!project.screens.length}
-          onClick={onPreview}
-        >
-          <ArrowDownToLine size={16} />
-          HTML 프로토타입
-        </Button>
-      </div>
-    </>
-  );
+        </section>;
+      })}
+    </div>
+    <p className="muted">입력 묶음에는 현재 프로젝트 자료가 포함됩니다. 이 앱은 ChatGPT에 자동 업로드하지 않습니다. 수동 결과는 파일 형식·원문 인용·ID·사실 상태를 검사한 뒤 검토 창에 표시합니다.</p>
+    {project.rfp && <section className="panel workflow-output"><h3>RFP 분석과 원문 근거</h3><p>{project.rfp.summary}</p>
+      {project.rfp.items.map((item) => <article key={item.id}><strong>{({ goal: "목표", requirement: "요구", evaluation: "평가", constraint: "제약" })[item.kind]} · {item.text}</strong><blockquote>{item.quote}</blockquote><small>{item.sourceId} → {item.requirementIds.join(", ") || "연결 요구 없음"}</small></article>)}
+      {!!project.rfp.questions.length && <><h4>확인할 질문</h4><ul>{project.rfp.questions.map((q, i) => <li key={i}>{q}</li>)}</ul></>}
+    </section>}
+    {!!project.strategies?.length && <section className="panel workflow-output"><h3>근거 기반 제안 전략</h3>{project.strategies.map((s) => <article key={s.id}><strong>{s.id} · {s.title}</strong><p>{s.rationale}</p><small>{s.evidenceIds.join(", ")} → {s.requirementIds.join(", ")}</small></article>)}</section>}
+    <div className="panel workflow-intro"><h3>산출물을 직접 다듬고 내보내세요</h3><div className="workflow-actions"><Button variant="secondary" onClick={onProposal}>제안서 편집 · PPTX</Button><Button variant="secondary" onClick={onDesign}>화면설계 편집</Button><Button variant="secondary" disabled={!project.screens.length} onClick={onPreview}>HTML 프로토타입</Button></div><p className="muted">구조 연결과 HTML 예시 동작은 실제 고객 서비스의 구현·검증·승인을 뜻하지 않습니다.</p></div>
+  </>;
 }
 
 function References({ onUse }: { onUse: (kind: Screen["kind"]) => void }) {
@@ -3569,7 +3659,7 @@ function Workbench({
                       "프로젝트 ID는 바꿀 수 없습니다. 별도 프로젝트는 백업 가져오기를 사용하세요.",
                     );
                   if (!beforeChange()) return;
-                  update(next);
+                  update(invalidateImportedVerifications(next));
                   setError("");
                   notify("JSON 명세를 검증하고 반영했습니다.");
                 } catch (e) {
@@ -3625,7 +3715,7 @@ function Workbench({
                 onClick={() => {
                   if (confirm("현재 버전을 보관하고 이 버전으로 복원할까요?")) {
                     if (!beforeChange()) return;
-                    update(s.project);
+                    update(invalidateImportedVerifications(s.project));
                     setHistoryKey((v) => v + 1);
                     notify("버전을 복원했습니다.");
                   }
@@ -3658,6 +3748,10 @@ function Settings({
   refresh: () => void;
   notify: (s: string) => void;
 }) {
+  if (STATIC_HOST) return <>
+    <SectionHead eyebrow="BROWSER WORKSPACE" title="공개 웹의 실행 범위" description="API 키를 입력하지 않습니다. 자료는 이 브라우저에 저장하며 계정 로그인이나 AI 자동 실행을 가장하지 않습니다." />
+    <section className="panel workflow-intro"><h2>현재 사용할 수 있는 기능</h2><p>PDF·텍스트 RFP 읽기, 자료와 요구사항 편집, 단계별 수동 ChatGPT 입력 묶음과 결과 가져오기, 제안서·화면설계 편집, PPTX·HTML·CSV·Markdown·JSON 내보내기.</p><h3>아직 연결되지 않은 기능</h3><p>이 GitHub Pages에는 Node/Codex 서버와 사용자별 ChatGPT 로그인 서버가 없습니다. 별도 API 키 입력이나 가짜 로그인·토큰 표시를 제공하지 않습니다.</p><h3>개인 계정 연결의 다음 단계</h3><p>로컬 앱은 공식 Codex ChatGPT 로그인을 사용합니다. 사용자별 원격 로그인은 공식 Sign in with ChatGPT 지원 조건·등록과 서버 측 사용자 격리 검증이 필요합니다. 로그인 토큰을 브라우저 저장소에 넣거나 로컬 실행 서버를 공개하지 않습니다.</p><h3>내 자료 보관</h3><p>프로젝트는 현재 브라우저에만 남습니다. 같은 브라우저 프로필을 다른 사람과 공유하면 계정별로 격리되지 않습니다. 이 웹은 다중 사용자 계정 서비스가 아닙니다. JSON 백업으로 직접 보관하고 개인 자료의 공유 범위를 확인하세요.</p></section>
+  </>;
   async function copy(s: string) {
     try {
       await navigator.clipboard.writeText(s);

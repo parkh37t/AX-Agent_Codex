@@ -1,5 +1,7 @@
 # AX Agent Studio
 
+> 이 브랜치는 RFP 분석 → 근거 기반 전략 → Wylie 제안 → 화면설계 흐름을 추가한 검토본입니다. [실제 실행 범위와 검증 방법](docs/WEB-WORKFLOW.md)을 먼저 읽으세요. 아래 실행용 ZIP은 기존 기준본입니다. 최신 코드는 이 브랜치의 소스를 사용하세요. 공개 정적 모드는 AI 서버·로그인이 연결되지 않으며 ChatGPT 입력/결과 파일을 수동으로 교환합니다.
+
 자료를 모아 제안서를 만들고, 수주 후 요구사항과 화면 설계로 이어 가는 개인용 작업 공간입니다. 프로젝트 안에서 **자료 → 제안 → 범위 결정 → AS-IS 분석 → REQ·IA·FN·SCR → 연결 검수**를 관리합니다. 화면과 산출물은 직접 편집할 수 있고, AI 생성은 같은 컴퓨터의 Codex CLI에 로그인한 ChatGPT 계정을 사용합니다.
 
 **[실행용 소스 ZIP 다운로드](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/ax-agent-studio.zip)** · [연결 안내](docs/authentication.md) · [제품 명세](docs/product-spec.md) · [벤치마크 근거](docs/benchmark.md) · [검증 기록](docs/validation.md)

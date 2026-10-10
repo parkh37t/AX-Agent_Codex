@@ -1,5 +1,7 @@
 import {
   claimLabels,
+  verificationResultLabels,
+  verificationMethodLabels,
   traceRows,
   type Project,
   type Screen,
@@ -88,6 +90,15 @@ export function projectMarkdown(project: Project): string {
     "## 제안 장표",
     "",
   ];
+  if (project.rfp) {
+    output.push("## RFP 분석", "", md(project.rfp.summary), "");
+    for (const item of project.rfp.items) output.push(`### ${md(item.id)} · ${md(item.kind)}`, "", md(item.text), "", `원문 인용: ${md(item.quote)}`, `출처: ${md(item.sourceId)} · 요구: ${list(item.requirementIds)}`, "");
+    output.push("### 확인할 질문", "", ...project.rfp.questions.map((q) => `- ${md(q)}`), "");
+  }
+  if (project.strategies?.length) {
+    output.push("## 근거 기반 전략", "");
+    for (const s of project.strategies) output.push(`### ${md(s.id)} · ${md(s.title)}`, "", md(s.rationale), "", `근거: ${list(s.evidenceIds)} · 요구: ${list(s.requirementIds)} · 상태: 제안`, "");
+  }
   for (const slide of project.proposal.slides) {
     output.push(
       `### ${md(slide.id)} · ${md(slide.title)}`,
@@ -99,6 +110,7 @@ export function projectMarkdown(project: Project): string {
       `근거 상태: ${stateLabel(slide.claim)}  `,
       `도식: ${md(slide.diagram)}  `,
       `자료: ${list(slide.evidenceIds)}  `,
+      `전략: ${list(slide.strategyIds ?? [])}  `,
       `요구사항: ${list(slide.requirementIds)}`,
       "",
     );
@@ -207,7 +219,35 @@ export function projectMarkdown(project: Project): string {
       "",
     );
   }
+  output.push("## 생성 입력과 적용 이력", "");
+  for (const history of project.generationHistory ?? []) {
+    output.push(`### ${md(history.task)} · ${md(history.method)} · ${md(history.appliedAt)}`, "");
+    for (const s of history.sources) output.push(`- 자료 ${md(s.id)} · ${md(s.name)} · 읽기 범위: ${md(s.readScope)}`);
+    for (const k of history.knowledge) output.push(`- 제작 규칙 ${md(k.path)} · SHA256 ${md(k.sha256)}`);
+    output.push("", "입력·반영 경로 기록이며 모델 재훈련이나 실제 서비스 동작의 검증을 뜻하지 않습니다.", "");
+  }
+  output.push("## 수용 기준 검증 이력", "", "사용자 기록이며 자동 실행·고객 승인 증거가 아닙니다. 프로토타입 결과와 실서비스 확인은 구분합니다.", "");
+  for (const r of project.verifications ?? []) {
+    output.push(`### ${md(r.requirementId)} · ${verificationResultLabels[r.result]}`, "",
+      `- 방법: ${verificationMethodLabels[r.method]}`,
+      `- 상태: ${verificationCurrency(project, r)}`,
+      `- 확인자: ${md(r.reviewer)} · ${md(r.recordedAt)}`,
+      `- 기록 당시 수용 기준: ${md(r.acceptance)}`, "", md(r.evidence), "");
+  }
   return `${output.join("\n")}\n`;
+}
+
+function verificationCurrency(project: Project, record: NonNullable<Project["verifications"]>[number]): string {
+  return record.invalidated || !project.requirements.some((r) => r.id === record.requirementId)
+    ? "재검증 필요" : "현재 명세에 대한 기록";
+}
+
+export function verificationCsv(project: Project): string {
+  const rows = (project.verifications ?? []).map((r) => [r.id, r.requirementId,
+    r.result, verificationResultLabels[r.result], verificationMethodLabels[r.method],
+    verificationCurrency(project, r), r.acceptance, r.evidence, r.reviewer, r.recordedAt]);
+  return [["기록 ID", "요구사항 ID", "결과 코드", "결과", "방법", "재검증 상태", "기록 당시 수용 기준", "관찰 근거", "확인자", "기록 시각"], ...rows]
+    .map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
 function csvCell(value: unknown): string {
@@ -1006,6 +1046,7 @@ export async function exportProposalPptx(project: Project): Promise<void> {
             claim: item.claim,
             evidenceIds: item.evidenceIds,
             requirementIds: item.requirementIds,
+            strategyIds: item.strategyIds ?? [],
             pagination: { part: partIndex + 1, total: pages.length },
             titleShortened: title.shortened,
             bodyTruncated: false,
