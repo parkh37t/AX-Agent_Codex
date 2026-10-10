@@ -6,6 +6,8 @@
 
 ZIP은 설치 프로그램이 아닌 소스 묶음입니다. 압축을 푼 폴더에서 아래 명령을 실행하세요. **현재 공개 사이트는 배포되지 않았습니다.** GitHub 페이지는 코드·문서·파일을 제공하며, 아래 로컬 주소는 실행한 컴퓨터에서만 열립니다.
 
+**[모든 환경 설정·MD·스킬·GitHub 위치 안내](docs/FILE-MAP.md)**
+
 ## 스킬·설정·지식 이어서 사용
 
 **[전체 스킬·MD ZIP 다운로드](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/ax-agent-studio-skills-md.zip)** · [통합 지식 MD](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/AX-AGENT-KNOWLEDGE.md) · [시작 안내](START-HERE.md)

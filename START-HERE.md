@@ -2,6 +2,8 @@
 
 이 묶음은 **설정·스킬·지식 문서**다. 공개 웹사이트 또는 자동 설치 프로그램은 아니다. 모든 파일은 2026-10-10에 확인한 내용을 기준으로 한다.
 
+전체 경로와 GitHub 주소는 [파일 위치 안내](docs/FILE-MAP.md)를 먼저 확인하세요.
+
 ## 가장 간단한 재사용
 
 1. ChatGPT 프로젝트나 다음 대화에 `AX-AGENT-KNOWLEDGE.md`를 업로드한다.
@@ -28,7 +30,7 @@ Codex의 프로젝트 스킬 경로는 이 묶음의 `.agents/skills/`다. 다�
 | `.agents/skills/wylie-proposal/` | 제안서 콘텐츠·폰트·도식·레이아웃 제작 스킬과 합성 템플릿 |
 | `config/project-environment.snapshot.json` | 비밀값 없는 실제 클라우드 초안 설정 기록 |
 | `config-files/` | 앱의 패키지·빌드·테스트 설정 원문 사본 |
-| `MANIFEST.json` | 묶음 파일별 크기·SHA-256·역할 |
+| `MANIFEST.json` | 묶음 파일별 경로·크기·SHA-256 |
 
 GitHub 저장소에서 단일 MD는 `downloads/AX-AGENT-KNOWLEDGE.md`에 있다. ZIP에서는 위 안내처럼 최상위에 있다. `config-files/`는 설정 열람용 사본이며 독립적으로 실행할 앱이 아니다. 패키지를 다시 만드는 `python scripts/package_knowledge.py` 명령도 **전체 앱 소스 checkout에서만** 실행한다. 스킬·MD ZIP에는 그 명령에 필요한 앱 소스 전체가 없다.
 

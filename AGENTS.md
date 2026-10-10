@@ -2,6 +2,7 @@
 
 이 저장소의 제품 목표는 제안서 작성부터 수주 후 범위 결정, AS-IS 분석, REQ·IA·FN·SCR 화면 설계까지 이어지는 개인용 작업 공간이다. 현재 사용자의 요청을 우선하고 기존 변경·자료를 보존한다.
 
+- 전체 파일·GitHub 위치: `docs/FILE-MAP.md`.
 - 시작 문서: `docs/CONTINUE-HERE.md`, `docs/PROJECT-SETTINGS.md`.
 - 개발·설정 스킬: `.agents/skills/ax-agent-studio/SKILL.md`.
 - 제안서 제작 스킬: `.agents/skills/wylie-proposal/SKILL.md`.
