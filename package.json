@@ -1,0 +1,46 @@
+{
+  "name": "ax-agent-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n bridge,web \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "codex:login": "codex login",
+    "codex:status": "codex login status"
+  },
+  "dependencies": {
+    "@openai/codex": "0.162.1",
+    "express": "^5.1.0",
+    "fast-xml-parser": "^5.3.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.468.0",
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^5.4.296",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}
