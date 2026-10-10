@@ -1,0 +1,35 @@
+// Test-only executable. Production entrypoint never imports this module.
+import type {Project,Task} from '../../shared/domain';
+import {readFileSync} from 'node:fs';
+import {createServer} from 'node:https';
+import {createHash,randomBytes} from 'node:crypto';
+import express from 'express';
+import {join} from 'node:path';
+import {newDb} from 'pg-mem';
+import {exportJWK,generateKeyPair,SignJWT} from 'jose';
+import {createOidcAuth,PgAuthStore} from '../../server/oidc-auth';
+import {migrate} from '../../server/pg-runtime';
+import {PostgresWorkflowStore} from '../../server/postgres-workflow-store';
+import {createHostedApi} from '../../server/hosted-api';
+import {WebWorkflow} from '../../server/web-workflow';
+import {workflowResult} from './workflow';
+if(process.env.NODE_ENV!=='test')throw Error('Test server cannot run in production');
+const origin='https://localhost:5443',issuer=origin+'/issuer';
+const db=newDb(),adapter=db.adapters.createPg(),pool=new adapter.Pool();await migrate(pool as any);
+const {publicKey,privateKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='synthetic';jwk.alg='RS256';jwk.use='sig';
+const codes=new Map<string,{sub:string;nonce:string;challenge:string;redirect:string}>();
+const app=express();let failNext=false;let invalidNonce=false;let invalidSignature=false;const faults=new Set<string>();
+app.get('/issuer/.well-known/openid-configuration',(_req,res)=>res.json({issuer,authorization_endpoint:issuer+'/authorize',token_endpoint:issuer+'/token',jwks_uri:issuer+'/jwks',response_types_supported:['code'],subject_types_supported:['public'],id_token_signing_alg_values_supported:['RS256'],token_endpoint_auth_methods_supported:['client_secret_post'],code_challenge_methods_supported:['S256']}));
+app.get('/issuer/jwks',(_req,res)=>res.json({keys:[jwk]}));
+app.get('/issuer/authorize',(req,res)=>{if(!req.query.user){const query=new URLSearchParams(req.query as Record<string,string>);res.type('html').send(`<h1>로컬 모의 OIDC</h1><a href="?${query.toString()}&user=A">테스트 사용자 A</a><br><a href="?${query.toString()}&user=B">테스트 사용자 B</a><br><a href="?${query.toString()}&user=C">허용되지 않은 사용자</a>`);return;}const code=randomBytes(24).toString('hex');codes.set(code,{sub:String(req.query.user),nonce:String(req.query.nonce),challenge:faults.delete('pkce')?'mismatched-pkce-challenge':String(req.query.code_challenge),redirect:String(req.query.redirect_uri)});const url=new URL(String(req.query.redirect_uri));url.searchParams.set('code',code);url.searchParams.set('state',faults.delete('state')?'wrong-state':String(req.query.state));url.searchParams.set('iss',faults.delete('response_issuer')?origin+'/wrong-issuer':issuer);res.redirect(url.href);});
+app.post('/issuer/token',express.urlencoded({extended:false}),async(req,res)=>{const entry=codes.get(req.body.code);codes.delete(req.body.code);if(!entry||req.body.client_id!=='synthetic-client'||req.body.client_secret!=='synthetic-secret'||req.body.redirect_uri!==entry.redirect||createHash('sha256').update(String(req.body.code_verifier)).digest('base64url')!==entry.challenge){res.status(400).json({error:'invalid_grant'});return;}
+ const key=invalidSignature?(await generateKeyPair('RS256')).privateKey:privateKey;invalidSignature=false;
+ const jwt=await new SignJWT({nonce:invalidNonce?'wrong-nonce':entry.nonce}).setProtectedHeader({alg:'RS256',kid:'synthetic'}).setIssuer(faults.delete('issuer')?origin+'/wrong-issuer':issuer).setSubject(entry.sub).setAudience(faults.delete('audience')?'wrong-client':'synthetic-client').setIssuedAt().setExpirationTime(faults.delete('expired')?'1h ago':'1h').sign(key);invalidNonce=false;res.json({access_token:'synthetic-access-token',token_type:'Bearer',expires_in:3600,id_token:jwt});});
+const server=createServer({key:readFileSync(join(process.env.AX_TEST_CERT_DIR!,'key.pem')),cert:readFileSync(join(process.env.AX_TEST_CERT_DIR!,'cert.pem'))},app);await new Promise<void>(r=>server.listen(5443,'127.0.0.1',r));
+const auth=await createOidcAuth(pool,{AX_PUBLIC_ORIGIN:origin,AX_OIDC_ISSUER:issuer,AX_OIDC_CLIENT_ID:'synthetic-client',AX_OIDC_CLIENT_SECRET:'synthetic-secret',AX_OIDC_ALLOWED_SUBJECTS:'A,B'});
+const runner={kind:'test' as const,status:()=>({ready:true,reason:'synthetic_test_only'}),run:async({project,task}:{project:Project;task:Task})=>{if(failNext){failNext=false;throw Error('synthetic failure');}return workflowResult(project,task);}};
+const workflow=new WebWorkflow(new PostgresWorkflowStore(pool),auth.identity,runner);
+app.post('/__test/:action',express.json(),async(req,res)=>{if(req.params.action==='expire'){await pool.query("DELETE FROM ax_auth_records WHERE kind='session'");}if(req.params.action==='fail')failNext=true;if(req.params.action==='nonce')invalidNonce=true;if(req.params.action==='signature')invalidSignature=true;if(['state','pkce','issuer','audience','response_issuer','expired'].includes(req.params.action))faults.add(req.params.action);res.sendStatus(204);});
+app.use(createHostedApi({workflow,runner,origin,identityConfigured:true,authRouter:auth.router}));
+app.use(express.static('dist-operator'));
+const stop=()=>{workflow.dispose();server.close();void pool.end();};process.on('SIGTERM',stop);process.on('SIGINT',stop);

@@ -9,3 +9,6 @@ playwright-report/
 !.env.example
 auth.json
 .DS_Store
+
+dist-operator/
+!.env.operator.example

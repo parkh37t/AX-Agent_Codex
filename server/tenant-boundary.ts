@@ -5,7 +5,7 @@ export type IdentitySession = {
 };
 /** All scope fields must come from a verified server-side session, never browser owner IDs. */
 export interface IdentityAdapter {
-  kind: "official_siwc" | "test";
+  kind: "official_siwc" | "oidc" | "test";
   resolve(sessionHandle: string): Promise<IdentitySession | null>;
   revoke(sessionHandle: string): Promise<void>;
 }
@@ -61,6 +61,8 @@ export class TenantWorkspace {
     const project = projectSchema.parse(value);
     this.projects.set(JSON.stringify([ownerKey(session), project.id]), structuredClone(project));
   }
+  /** Internal server contract only; never return this scope as browser-supplied authority. */
+  async authorize(handle: string) { return { ...await this.authenticate(handle) }; }
   async getProject(handle: string, id: string) {
     const session = await this.authenticate(handle);
     const project = this.projects.get(JSON.stringify([ownerKey(session), id]));

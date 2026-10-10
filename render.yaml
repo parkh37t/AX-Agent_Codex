@@ -1,0 +1,39 @@
+# Deployment specification only. No service has been created.
+services:
+  - type: web
+    name: ax-agent-operator
+    runtime: node
+    plan: free
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build:operator
+    startCommand: npm run start:operator
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_VERSION
+        value: "24.19.0"
+      - key: NODE_ENV
+        value: production
+      - key: AX_PUBLIC_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: AX_DB_MIGRATE
+        value: "false"
+      - key: AX_OIDC_ISSUER
+        sync: false
+      - key: AX_OIDC_CLIENT_ID
+        sync: false
+      - key: AX_OIDC_CLIENT_SECRET
+        sync: false
+      - key: AX_OIDC_ALLOWED_SUBJECTS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AX_API_EXECUTION_ENABLED
+        value: "false"
+      - key: AX_API_MODEL
+        value: gpt-5.6-luna
+      - key: AX_INPUT_USD_PER_MILLION
+        value: "0.20"
+      - key: AX_OUTPUT_USD_PER_MILLION
+        value: "1.20"

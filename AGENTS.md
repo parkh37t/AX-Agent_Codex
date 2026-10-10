@@ -1,3 +1,5 @@
+> **운영자 웹 브랜치 안내:** `codex/ax-operator-api`는 AX OIDC 로그인 + 운영자 OpenAI API 방식입니다. 최신 실행·검증 기준은 `docs/operator-deployment.md`이며, 아래 개인 ChatGPT/CLI 지침은 기존 실행 모드에만 적용합니다. GitHub 소스 보존과 실제 배포·유료 호출은 별도입니다. 테스트용 인증/서명 키는 운영에 사용하지 않습니다.
+
 # AX Agent Studio 작업 안내
 
 이 저장소의 제품 목표는 제안서 작성부터 수주 후 범위 결정, AS-IS 분석, REQ·IA·FN·SCR 화면 설계까지 이어지는 개인용 작업 공간이다. 현재 사용자의 요청을 우선하고 기존 변경·자료를 보존한다.

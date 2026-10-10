@@ -161,7 +161,7 @@ export const projectSchema = artifactSchema.extend({
   workflow: workflowSchema.optional(),
   generationHistory: z.array(z.object({
     task: z.enum(["rfp", "strategy", "proposal", "design", "analysis", "all"]),
-    method: z.enum(["codex_cli", "manual_chatgpt"]),
+    method: z.enum(["codex_cli", "manual_chatgpt", "operator_api"]),
     appliedAt: z.string(),
     sources: z.array(z.object({ id, name: z.string(), readScope: z.string() })).max(50),
     knowledge: z.array(z.object({ path: z.string(), sha256: z.string() })).max(10),
