@@ -1,2 +1,0 @@
-slide_id,section_id,rfp_ids,evaluation_ids,audience_question,governing_message,evidence_ids,diagram_type,content_blocks,reuse_source,work_mode,deliverable_role,key_message_id,estimated_speaking_seconds,owner,reviewer,writing_stage,claim_status,open_questions
-SLIDE-EXAMPLE,<과제 또는 절 ID>,<RFP-ID;RFP-ID>,<EVAL-ID>,<이 장에서 답할 평가자의 질문>,<주제명이 아닌 결론 한 문장>,<SOURCE-ID;SOURCE-ID>,<comparison process hierarchy dependency evidence 등>,<본문 블록1;본문 블록2>,<파일 버전 페이지와 재사용 범위>,<new adapt reuse>,<submission presentation backup>,<THEME-ID>,,<작성 역할>,<검토 역할>,brief,placeholder,<필요한 근거나 미확인 질문>
