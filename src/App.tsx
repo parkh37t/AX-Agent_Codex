@@ -347,6 +347,7 @@ export default function App() {
     instruction?: string;
     workflow?: boolean;
     manual?: boolean;
+    requestId?: string;
   } | null>(savedJob?.context ?? null);
   const [pending, setPending] = useState<{
     result: Artifacts;
@@ -609,7 +610,7 @@ export default function App() {
       if (!ticket || ticket.id !== envelope.requestId || envelope.task !== task || ticket.updatedAt !== project.updatedAt)
         throw new Error("입력 묶음과 결과가 일치하지 않거나 자료가 변경됐습니다. 현재 단계의 입력 묶음을 다시 내보내세요.");
       const result = validateManualResult(project, envelope.artifacts, task);
-      const context = { projectId: project.id, task, updatedAt: project.updatedAt, workflow: true, manual: true };
+      const context = { projectId: project.id, task, updatedAt: project.updatedAt, workflow: true, manual: true, requestId: ticket.id };
       setJobContext(context);
       setJob({ id: ticket.id, status: "completed", stage: "수동 ChatGPT 결과 가져오기 · 실제 호출은 앱에서 확인하지 않음", result, knowledge: ticket.knowledge ?? [], startedAt: new Date().toISOString() });
       setPending({ result, context });
@@ -1117,7 +1118,9 @@ export default function App() {
                 onClick={() => {
                   downloadFile(
                     "AX-생성결과.json",
-                    JSON.stringify(pending.result, null, 2),
+                    JSON.stringify(pending.context.manual
+                      ? { requestId: pending.context.requestId, task: pending.context.task, artifacts: pending.result }
+                      : pending.result, null, 2),
                     "application/json",
                   );
                 }}
@@ -1431,12 +1434,14 @@ function Dashboard({
             <div>
               <h3>나의 ChatGPT로 연결</h3>
               <p>
-                {status?.authenticated
+                {STATIC_HOST
+                  ? "입력 묶음 다운로드 → 본인 ChatGPT에서 실행 → 결과 가져오기로 진행하세요."
+                  : status?.authenticated
                   ? "Codex의 ChatGPT 계정 로그인이 확인됐습니다."
                   : "API 키 입력 없이 Codex 계정 로그인으로 시작하세요."}
               </p>
               <button onClick={() => navigate("/settings")}>
-                {status?.authenticated ? "연결 상태 확인" : "연결 설정하기"}
+                {STATIC_HOST ? "공개 웹 사용 방법" : status?.authenticated ? "연결 상태 확인" : "연결 설정하기"}
                 <ArrowUpRight size={14} />
               </button>
             </div>
@@ -1551,11 +1556,11 @@ function NewProject({
             설계는 구체적으로.
           </h2>
           {[
-            ["01", "자료를 모으세요", "RFP · PDF · Word · PowerPoint · 회의록"],
+            ["01", "자료를 모으세요", STATIC_HOST ? "RFP · 텍스트 PDF · TXT · Markdown" : "RFP · PDF · Word · PowerPoint · 회의록"],
             [
               "02",
               "나의 GPT와 설계하세요",
-              "ChatGPT 계정으로 로그인한 Codex 사용",
+              STATIC_HOST ? "입력 묶음 다운로드 → 본인 ChatGPT 실행 → 결과 가져오기" : "ChatGPT 계정으로 로그인한 Codex 사용",
             ],
             [
               "03",

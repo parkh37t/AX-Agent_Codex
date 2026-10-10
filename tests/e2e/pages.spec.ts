@@ -21,6 +21,9 @@ test('static four-stage manual flow works without API requests, preserves edits 
   page.on('request', r => { if (r.url().includes('/api/') || /https?:\/\/(?!127\.0\.0\.1:5184)/.test(r.url())) forbidden.push(r.url()); });
   page.on('pageerror', e => errors.push(e.message));
   await seed(page);
+  await expect(page.getByText('입력 묶음 다운로드 → 본인 ChatGPT에서 실행 → 결과 가져오기로 진행하세요.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '새 프로젝트', exact: true }).click();
+  await expect(page.getByText('입력 묶음 다운로드 → 본인 ChatGPT 실행 → 결과 가져오기', { exact: true })).toBeVisible();
   await page.goto('./#/prototype');
   await expect(page.locator('.static-notice')).toContainText('미연결');
   await expect(page.getByRole('button', { name: 'RFP 분석 생성', exact: true })).toHaveCount(0);
@@ -46,6 +49,17 @@ test('static four-stage manual flow works without API requests, preserves edits 
     const dialog = page.getByRole('dialog', { name: '생성 결과 검토' });
     await expect(dialog).toBeVisible();
     expect(await active(page)).toEqual(p);
+    if (task === 'rfp') {
+      const savedWait = page.waitForEvent('download');
+      await dialog.getByRole('button', { name: '결과 JSON 저장', exact: true }).click();
+      const saved = await bytes(await savedWait);
+      expect(JSON.parse(saved.toString('utf8'))).toEqual({ requestId: ticket.id, task, artifacts: result });
+      await page.reload();
+      await expect(dialog).toHaveCount(0);
+      await stage.getByLabel(`${title} 결과 JSON`).setInputFiles({ name: 'saved-result.json', mimeType: 'application/json', buffer: saved });
+      await expect(dialog).toBeVisible();
+      expect(await active(page)).toEqual(p);
+    }
     await dialog.getByRole('button', { name: '프로젝트에 반영', exact: true }).click();
     await expect(stage).toContainText('검토·반영됨');
   }
