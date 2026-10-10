@@ -1,0 +1,83 @@
+# 작업용 사본을 만들어 채운다. <...>와 null은 미정 값이며 사실로 출력하지 않는다.
+# 날짜/분량/성과/금액을 기존 제안에서 복사하지 않는다.
+schema_version: 1
+project:
+  name: "<제안 프로젝트명>"
+  client: "<고객 또는 익명 표기>"
+  task_type: "<new_proposal|revise|presentation|audit|single_slide>"
+  objective: "<이번 결과물로 결정할 사항>"
+  language: "ko-KR"
+audience:
+  primary: "<주요 독자/평가자>"
+  decision_questions:
+    - "<평가자가 판단할 질문>"
+  known_evaluation_criteria: []
+  undisclosed_criteria_or_weights: []
+constraints:
+  submission_deadline: null
+  timezone: "Asia/Seoul"
+  mandatory_outline_source: null
+  page_limit: null
+  file_size_limit_mb: null
+  anonymous_evaluation: null
+  presentation_total_minutes: null
+  qa_minutes_within_total: null
+  demo_minutes_within_total: null
+  transition_and_buffer_minutes: null
+  fixed_scope: []
+  excluded_scope: []
+  commitments_requiring_confirmation: []
+inputs:
+  rfp:
+    file: null
+    version_or_date: null
+    completeness: "<full|partial|summary|unavailable>"
+  evaluation_table:
+    file: null
+    version_or_date: null
+  customer_context_sources: []
+  approved_company_credentials: []
+  approved_team_profiles: []
+  existing_proposals: []
+  current_service_evidence: []
+  visual_references: []
+  inaccessible_or_unread_sources: []
+story:
+  customer_goal: "<출처가 있거나 가정으로 표시한 고객 목표>"
+  why_now: "<이번 과제의 배경>"
+  central_proposition: "<고객 목표에 대한 제안의 관점>"
+  win_themes:
+    - theme_id: "THEME-EXAMPLE"
+      customer_problem: "<문제>"
+      proposed_action: "<구체적 접근>"
+      evidence_ids: []
+      deliverable: "<산출물>"
+      verification: "<확인 방법>"
+      claim_status: "<verified_fact|source_claim|proposal|hypothesis|unresolved|placeholder>"
+  additional_proposals: []
+visual:
+  brand_guideline_source: null
+  reference_slide_ids: []
+  canvas_ratio: "<지정값 또는 선택한 기본값>"
+  font_primary: null
+  font_fallback: null
+  font_availability_checked: false
+  accent_color: null
+  tone: "<문체와 시각적 톤>"
+  accessibility_or_projection_needs: []
+outputs:
+  requested_formats: []
+  submission_deck: null
+  presentation_deck: null
+  qa_backup: null
+  pdf_preview: null
+  source_register: null
+  requirement_and_evaluation_mapping: null
+  quality_report: null
+working_state:
+  stage: "brief"
+  assumptions: []
+  unresolved_questions: []
+  source_conflicts: []
+  checks_completed: []
+  checks_not_run: []

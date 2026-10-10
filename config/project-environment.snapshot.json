@@ -1,0 +1,392 @@
+{
+  "recordedOn": "2026-10-10",
+  "purpose": "Portable project configuration; importing this file does not apply or publish a cloud environment.",
+  "repository": {
+    "name": "parkh37t/AX-Agent_Codex",
+    "developmentBranch": "codex/ax-agent-studio",
+    "applicationBaselineCommit": "5cefbd6",
+    "workspacePath": "/workspace/AX-Agent_Codex",
+    "configuredRepositoryRef": "HEAD"
+  },
+  "draft": {
+    "saved": true,
+    "revision": 2,
+    "publicationConfirmed": false,
+    "install_script": "set -eu\ncd /workspace/AX-Agent_Codex\nnode -e 'const [major,minor]=process.versions.node.split(\".\").map(Number); if(major<22 || (major===22 && minor<12)) { console.error(\"AX Agent Studio requires Node.js 22.12 or newer\"); process.exit(1); }'\nnpm ci --cache /workspace/.cache/npm --no-audit --no-fund\nnpm run build\nnpm test\n",
+    "start_skill": "# AX Agent Studio cloud development\n\nUse the existing isolated checkout at /workspace/AX-Agent_Codex. Do not create a Git worktree unless the user explicitly requests one. Preserve existing changes and the local .agents skill files. The implemented app is on codex/ax-agent-studio; inspect the actual checkout and README rather than resetting branches.\n\nDependencies and dist are prepared by install_script. Processes do not survive environment publication or a new task. From the checkout run npm run dev in a managed long-running terminal for React/Vite at 127.0.0.1:5173 and the local bridge at 127.0.0.1:4318. For the built application run npm start instead, using 4318. Do not run both bridge instances at once. Stop only processes started for this app when changing mode.\n\nCheck the HTML response and GET http://127.0.0.1:4318/api/status. The status endpoint normalizes authentication information; never print raw CLI login output, credential files, or process environment values. Verify application behavior with npm run build, npm test, and npm run test:e2e when browser-related changes require it. Playwright uses an installed Chromium or its normal bundled browser; this snapshot has /usr/bin/chromium. Browser tests mock AI and do not consume account inference usage.\n\nThe app includes official @openai/codex 0.162.1 and uses ChatGPT account login, not API-key billing. This cloud instance confirmed ChatGPT authentication but generationReady=false because the protected Codex runtime storage is read-only. Do not copy credentials, alter CODEX_HOME, or weaken protection to bypass this limitation. Report authentication separately from successful inference. Actual AI generation on the user's local computer remains unverified. Local account setup is documented in docs/authentication.md; no API secret is required for this app.\n\nUse loopback requests for internal validation. The onboarding UI does not support user-facing localhost preview links. GitHub download links and screenshots in README are the deliverable review paths. Saving the configuration does not publish the environment or establish that restoration on a new task was tested.\n",
+    "network_policy": {
+      "type": "restricted",
+      "presets": [
+        "package_managers"
+      ],
+      "egress_rules": [],
+      "preset_egress_rules": [
+        {
+          "host": "github.com"
+        },
+        {
+          "host": "codeload.github.com"
+        },
+        {
+          "host": "github-cloud.githubusercontent.com"
+        },
+        {
+          "host": "github-cloud.s3.amazonaws.com"
+        },
+        {
+          "host": "lfs.github.com"
+        },
+        {
+          "host": "release-assets.githubusercontent.com"
+        },
+        {
+          "host": "git.chatgpt-team.site"
+        },
+        {
+          "host": "eu.git.chatgpt-team.site"
+        },
+        {
+          "host": "us.git.chatgpt-team.site"
+        },
+        {
+          "host": "git.chatgpt.site"
+        },
+        {
+          "host": "eu.git.chatgpt.site"
+        },
+        {
+          "host": "us.git.chatgpt.site"
+        },
+        {
+          "host": "git.appgardenapps.dev"
+        },
+        {
+          "host": "eu.git.appgardenapps.dev"
+        },
+        {
+          "host": "us.git.appgardenapps.dev"
+        },
+        {
+          "host": "git.appgardenapps.com"
+        },
+        {
+          "host": "pypi.org"
+        },
+        {
+          "host": "files.pythonhosted.org"
+        },
+        {
+          "host": "download.pytorch.org"
+        },
+        {
+          "host": "download-r2.pytorch.org"
+        },
+        {
+          "host": "registry.npmjs.org"
+        },
+        {
+          "host": "registry.yarnpkg.com"
+        },
+        {
+          "host": "buf.build"
+        },
+        {
+          "host": "crates.io"
+        },
+        {
+          "host": "index.crates.io"
+        },
+        {
+          "host": "static.crates.io"
+        },
+        {
+          "host": "static.rust-lang.org"
+        },
+        {
+          "host": "proxy.golang.org"
+        },
+        {
+          "host": "sum.golang.org"
+        },
+        {
+          "host": "dl.google.com"
+        },
+        {
+          "host": "repo.maven.apache.org"
+        },
+        {
+          "host": "repo1.maven.org"
+        },
+        {
+          "host": "plugins.gradle.org"
+        },
+        {
+          "host": "plugins-artifacts.gradle.org"
+        },
+        {
+          "host": "services.gradle.org"
+        },
+        {
+          "host": "downloads.gradle.org"
+        },
+        {
+          "host": "bcr.bazel.build"
+        },
+        {
+          "host": "mirror.bazel.build"
+        },
+        {
+          "host": "pkgconfig.freedesktop.org"
+        },
+        {
+          "host": "cpan.metacpan.org"
+        },
+        {
+          "host": "archive.ubuntu.com"
+        },
+        {
+          "host": "security.ubuntu.com"
+        },
+        {
+          "host": "ports.ubuntu.com"
+        },
+        {
+          "host": "ppa.launchpadcontent.net"
+        },
+        {
+          "host": "packages.microsoft.com"
+        },
+        {
+          "host": "apt.buildkite.com"
+        },
+        {
+          "host": "developer.download.nvidia.com"
+        },
+        {
+          "host": "deb.nodesource.com"
+        },
+        {
+          "host": "deb.debian.org"
+        },
+        {
+          "host": "security.debian.org"
+        },
+        {
+          "host": "apt.llvm.org"
+        },
+        {
+          "host": "bitbucket.org"
+        },
+        {
+          "host": "cpan.org"
+        },
+        {
+          "host": "auth.docker.io"
+        },
+        {
+          "host": "production.cloudfront.docker.com"
+        },
+        {
+          "host": "dot.net"
+        },
+        {
+          "host": "gcr.io"
+        },
+        {
+          "host": "ghcr.io"
+        },
+        {
+          "host": "gitlab.com"
+        },
+        {
+          "host": "goproxy.io"
+        },
+        {
+          "host": "hex.pm"
+        },
+        {
+          "host": "jcenter.bintray.com"
+        },
+        {
+          "host": "mcr.microsoft.com"
+        },
+        {
+          "host": "nodejs.org"
+        },
+        {
+          "host": "nuget.org"
+        },
+        {
+          "host": "packagecloud.io"
+        },
+        {
+          "host": "ppa.launchpad.net"
+        },
+        {
+          "host": "pub.dev"
+        },
+        {
+          "host": "pypi.python.org"
+        },
+        {
+          "host": "quay.io"
+        },
+        {
+          "host": "registry-1.docker.io"
+        },
+        {
+          "host": "rubygems.org"
+        },
+        {
+          "host": "sourceforge.net"
+        },
+        {
+          "host": "aka.ms"
+        },
+        {
+          "host": "api.nuget.org"
+        },
+        {
+          "host": "archive.apache.org"
+        },
+        {
+          "host": "azuresearch-usnc.nuget.org"
+        },
+        {
+          "host": "azuresearch-ussc.nuget.org"
+        },
+        {
+          "host": "builds.dotnet.microsoft.com"
+        },
+        {
+          "host": "builds.hex.pm"
+        },
+        {
+          "host": "cache.ruby-lang.org"
+        },
+        {
+          "host": "cdn.cocoapods.org"
+        },
+        {
+          "host": "cdn.jsdelivr.net"
+        },
+        {
+          "host": "cdn.quay.io"
+        },
+        {
+          "host": "cdn01.quay.io"
+        },
+        {
+          "host": "cdn02.quay.io"
+        },
+        {
+          "host": "cdn03.quay.io"
+        },
+        {
+          "host": "cdn04.quay.io"
+        },
+        {
+          "host": "cdn05.quay.io"
+        },
+        {
+          "host": "cdn06.quay.io"
+        },
+        {
+          "host": "conda.anaconda.org"
+        },
+        {
+          "host": "d3fo0g5hm7lbuv.cloudfront.net"
+        },
+        {
+          "host": "dl.k8s.io"
+        },
+        {
+          "host": "dlcdn.apache.org"
+        },
+        {
+          "host": "download.eclipse.org"
+        },
+        {
+          "host": "download.oracle.com"
+        },
+        {
+          "host": "download.swift.org"
+        },
+        {
+          "host": "downloads.haskell.org"
+        },
+        {
+          "host": "downloads.sourceforge.net"
+        },
+        {
+          "host": "get-ghcup.haskell.org"
+        },
+        {
+          "host": "get.rvm.io"
+        },
+        {
+          "host": "globalcdn.nuget.org"
+        },
+        {
+          "host": "go.dev"
+        },
+        {
+          "host": "hackage.haskell.org"
+        },
+        {
+          "host": "pkg-containers.githubusercontent.com"
+        },
+        {
+          "host": "pkgs.k8s.io"
+        },
+        {
+          "host": "prod-cdn.packages.k8s.io"
+        },
+        {
+          "host": "raw.githubusercontent.com"
+        },
+        {
+          "host": "registry.bower.io"
+        },
+        {
+          "host": "registry.terraform.io"
+        },
+        {
+          "host": "releases.bazel.build"
+        },
+        {
+          "host": "releases.hashicorp.com"
+        },
+        {
+          "host": "repo.anaconda.com"
+        },
+        {
+          "host": "repo.hex.pm"
+        },
+        {
+          "host": "repo.packagist.org"
+        },
+        {
+          "host": "sh.rustup.rs"
+        }
+      ]
+    },
+    "secretRequirementNames": [],
+    "environmentVariableRequirements": []
+  },
+  "runtimeObservation": {
+    "observationsCurrent": true,
+    "connectivity": "connected",
+    "networkPolicyMode": "restricted",
+    "networkPolicyState": "unknown",
+    "note": "The state is unknown in this observation; this is not proof of enforcement, reachability, or deployment."
+  },
+  "authentication": {
+    "mode": "official Codex ChatGPT login",
+    "pinnedCli": "0.162.1",
+    "apiKeyRequired": false,
+    "credentialsIncluded": false,
+    "inferenceValidated": false,
+    "knownCloudBlocker": "Codex runtime storage is read-only; authentication was confirmed but generationReady=false."
+  }
+}

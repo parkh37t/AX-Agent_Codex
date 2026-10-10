@@ -4,7 +4,15 @@
 
 **[실행용 소스 ZIP 다운로드](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/ax-agent-studio.zip)** · [연결 안내](docs/authentication.md) · [제품 명세](docs/product-spec.md) · [벤치마크 근거](docs/benchmark.md) · [검증 기록](docs/validation.md)
 
-ZIP은 설치 프로그램이 아닌 소스 묶음입니다. 압축을 푼 폴더에서 아래 명령을 실행하세요.
+ZIP은 설치 프로그램이 아닌 소스 묶음입니다. 압축을 푼 폴더에서 아래 명령을 실행하세요. **현재 공개 사이트는 배포되지 않았습니다.** GitHub 페이지는 코드·문서·파일을 제공하며, 아래 로컬 주소는 실행한 컴퓨터에서만 열립니다.
+
+## 스킬·설정·지식 이어서 사용
+
+**[전체 스킬·MD ZIP 다운로드](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/ax-agent-studio-skills-md.zip)** · [통합 지식 MD](https://github.com/parkh37t/AX-Agent_Codex/raw/refs/heads/codex/ax-agent-studio/downloads/AX-AGENT-KNOWLEDGE.md) · [시작 안내](START-HERE.md)
+
+AX 개발·실행 스킬과 Wylie 제안서 제작 스킬, 실제 설정 스냅샷, 폰트·도식·레이아웃 규칙, 재개 프롬프트와 검증 기록을 함께 제공합니다. ChatGPT에서는 통합 MD를 파일로 올리고 [프로젝트 지침](docs/PROJECT-INSTRUCTIONS.md)을 지침에 복사하세요. 코딩 도구에서는 `.agents/skills/`의 두 폴더 전체를 사용하세요. [모든 설정](docs/PROJECT-SETTINGS.md) · [인수인계](docs/CONTINUE-HERE.md) · [무결성 해시](downloads/AX-AGENT-SKILLS-SHA256SUMS).
+
+묶음은 인증·브라우저 데이터를 이전하거나 사이트를 배포하지 않습니다. **전체 앱 소스 checkout에서** `python scripts/package_knowledge.py`로 현재 문서와 스킬에서 단일 MD·스킬 ZIP·소스 ZIP을 다시 만들 수 있습니다.
 
 ![AX Agent Studio 프로젝트 개요](docs/images/dashboard.png)
 
