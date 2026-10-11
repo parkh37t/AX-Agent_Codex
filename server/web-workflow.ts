@@ -46,6 +46,7 @@ export class WebWorkflow {
   private boundary: TenantWorkspace;
   private ready:Promise<void>;
   private initializationFailed=false;
+  private disposed=false;
   private active = new Map<string,{ boundaryId:string; signal:AbortSignal; abort:()=>void; handle:string; session:IdentitySession }>();
   private cancellationRequested = new Set<string>();
   private revoked = new Set<string>();
@@ -58,7 +59,7 @@ export class WebWorkflow {
       if(interrupted)await store.commit(s=>{for(const j of Object.values(s.jobs))if(j.status==='queued'||j.status==='running'){j.status='failed';j.error='interrupted_restart';delete j.result;}});
     })().catch(()=>{this.initializationFailed=true;});
   }
-  async storageReady(){await this.ready;return !this.initializationFailed;}
+  async storageReady(){await this.ready;return !this.initializationFailed&&!this.disposed;}
   private async auth(handle:string) {
     await this.ready;
     if(this.initializationFailed)throw new WorkflowError(503,'storage_unavailable');
@@ -66,7 +67,7 @@ export class WebWorkflow {
     this.guard(handle,s);return s;
   }
   private guard(handle:string,s:IdentitySession,signal?:AbortSignal) {
-    if(this.revoked.has(handle)||s.expiresAt<=Date.now()||signal?.aborted) throw new WorkflowError(401,'Session or job is no longer active');
+    if(this.disposed||this.revoked.has(handle)||s.expiresAt<=Date.now()||signal?.aborted) throw new WorkflowError(401,'Session or job is no longer active');
   }
   private async commitUser<T>(handle:string,session:IdentitySession,fn:(state:State)=>T){const value=await this.store.commit(fn,()=>this.guard(handle,session));await this.auth(handle);this.guard(handle,session);return value;}
   private owned(s:State,scope:string,id:string) { const j=s.jobs[id];if(!j||j.owner!==scope)throw new WorkflowError(404,'Job not found');return j; }
@@ -169,5 +170,5 @@ export class WebWorkflow {
   async projectJobs(handle:string,id:string){const session=await this.auth(handle),scope=owner(session),state=await this.store.read();const p=state.projects[projectKey(scope,id)];if(!p)throw new WorkflowError(404,'Project not found');await this.auth(handle);this.guard(handle,session);return Object.values(state.jobs).filter(j=>j.owner===scope&&j.projectId===id&&j.revision===p.revision&&j.appliedRevision===undefined).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(j=>({id:j.id,status:j.status}));}
   async session(handle:string){await this.auth(handle);return {authenticated:true};}
   async logout(handle:string) {this.revoked.add(handle);await this.boundary.logout(handle);}
-  dispose(){this.boundary.dispose();this.active.clear();}
+  dispose(){this.disposed=true;for(const job of this.active.values())job.abort();this.boundary.dispose();this.active.clear();}
 }

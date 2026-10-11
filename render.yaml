@@ -1,4 +1,4 @@
-# Deployment specification only. No service has been created.
+# Repository specification; actual service changes require separate approval.
 services:
   - type: web
     name: ax-agent-operator
@@ -7,7 +7,8 @@ services:
     numInstances: 1
     buildCommand: npm ci --include=dev && npm run build:operator
     startCommand: npm run start:operator
-    healthCheckPath: /api/status
+    healthCheckPath: /health/live
+    autoDeployTrigger: "off"
     envVars:
       - key: NODE_VERSION
         value: "24.19.0"

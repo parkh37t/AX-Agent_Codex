@@ -1,3 +1,5 @@
+> **교체 실패 수정 검수본:** 현재 교체 전략은 [operator-handoff.md](operator-handoff.md)를 우선합니다. 이전의 기존 인스턴스 수동 종료 안내를 bounded standby 방식으로 대체합니다. 실제 서비스 변경은 이번 작업에서 수행하지 않았습니다.
+
 > **최초 등록 흐름:** 최초 subject 확인을 위한 [Google 등록 대기](google-registration.md)를 추가했습니다. 기본 폐쇄이며 명시적 등록 모드에서는 앱/API 권한을 부여하지 않습니다.
 
 # 운영자 웹 v10 — 실행·인증·브라우저 연결 완료 범위

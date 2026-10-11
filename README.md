@@ -1,3 +1,5 @@
+> 단일 worker 교체: [단일 worker 교체 대기](docs/operator-handoff.md). liveness와 업무 준비를 분리하고 락 획득 후에만 복구/작업을 시작합니다. 실제 구버전→신버전 Render 인계는 별도 배포 검증이 필요합니다.
+
 > 최초 사용자 등록: [Google 최초 사용자 등록 대기](docs/google-registration.md). 기본 OFF, 앱/API 권한 없음. 운영자가 명시적으로 켠 경우에만 등록 확인 화면을 제공합니다.
 
 # AX Agent Studio — 운영자 웹
