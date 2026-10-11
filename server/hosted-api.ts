@@ -5,7 +5,7 @@ import { WebWorkflow, WorkflowError, type WorkflowRunner } from './web-workflow'
 import { TenantAccessError } from './tenant-boundary';
 const submit=z.object({projectId:z.string().min(1),expectedRevision:z.number().int().positive(),task:z.enum(['rfp','strategy','proposal','design']),idempotencyKey:z.string().min(1).max(200)}).strict();
 /** Composition only, no listener, identity provider registration, credentials, or deployment side effects. */
-export function createHostedApi(options:{workflow:WebWorkflow;runner:WorkflowRunner;origin:string;identityConfigured:boolean;authRouter?:express.Router}) {
+export function createHostedApi(options:{workflow:WebWorkflow;runner:WorkflowRunner;origin:string;identityConfigured:boolean;authRouter?:express.Router;registrationEnabled?:boolean}) {
  const origin=new URL(options.origin);if(origin.protocol!=='https:')throw new Error('Hosted API requires an HTTPS public origin');
  const app=express();app.disable('x-powered-by');
  app.use((req,res,next)=>{
@@ -18,9 +18,9 @@ export function createHostedApi(options:{workflow:WebWorkflow;runner:WorkflowRun
  });
  if(options.authRouter)app.use('/auth',options.authRouter);
  app.use(express.json({limit:'256kb',strict:true}));
- app.get('/api/status',async(_req,res)=>{const storageReady=await options.workflow.storageReady(),status=options.runner.status?.()??{ready:false,reason:'execution_adapter_unconfigured'};res.json({mode:'operator_api',simulation:options.runner.kind==='test',identityConfigured:options.identityConfigured,storageReady,executionReady:status.ready,ready:options.identityConfigured&&status.ready&&storageReady,reason:!storageReady?'storage_unavailable':!options.identityConfigured?'identity_provider_not_configured':status.reason});});
+ app.get('/api/status',async(_req,res)=>{const storageReady=await options.workflow.storageReady(),status=options.runner.status?.()??{ready:false,reason:'execution_adapter_unconfigured'};res.json({mode:'operator_api',simulation:options.runner.kind==='test',identityConfigured:options.identityConfigured,loginConfigured:options.identityConfigured||!!options.registrationEnabled,registrationOnly:!!options.registrationEnabled&&!options.identityConfigured,storageReady,executionReady:status.ready,ready:options.identityConfigured&&status.ready&&storageReady,reason:!storageReady?'storage_unavailable':!options.identityConfigured?(options.registrationEnabled?'registration_only':'identity_provider_not_configured'):status.reason});});
  app.use('/api',(req,res,next)=>{
-  if(!options.identityConfigured)return void res.status(503).json({error:'identity_provider_not_configured'});
+  if(!options.identityConfigured)return void res.status(503).json({error:options.registrationEnabled?'registration_only_no_app_access':'identity_provider_not_configured'});
   const matches=(req.headers.cookie??'').split(';').map(s=>s.trim()).filter(s=>s.startsWith('__Host-ax-session='));
   if(matches.length!==1)return void res.status(401).json({error:'login_required'});
   const handle=matches[0].slice('__Host-ax-session='.length);

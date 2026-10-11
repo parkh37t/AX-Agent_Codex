@@ -14,7 +14,7 @@ export async function startOperator(env:NodeJS.ProcessEnv){
   if(env.AX_DB_MIGRATE==='true')await migrate(pool);
   // A session advisory lock enforces one active worker, including rolling deployments.
   lock=await pool.connect();const r=await lock.query('SELECT pg_try_advisory_lock(418023761) AS locked');if(!r.rows[0]?.locked){lock.release();lock=undefined;throw new Error('operator_worker_already_running');}
-  const auth=await createOidcAuth(pool,env),service=createOperatorService({pool,identity:auth.identity,origin:settings.origin,environment:env,authRouter:auth.router});
+  const auth=await createOidcAuth(pool,env),service=createOperatorService({pool,identity:auth.identity,origin:settings.origin,environment:env,authRouter:auth.router,apiAccessConfigured:auth.apiAccessConfigured,registrationEnabled:auth.registrationEnabled});
   if(!await service.workflow.storageReady())throw new Error('storage_unavailable');
   const dir=resolve('dist-operator');service.app.use(express.static(dir,{index:false}));service.app.get('/',(_req,res)=>res.sendFile(resolve(dir,'index.html')));
   const port=Number(env.PORT??4319);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('port_invalid');
